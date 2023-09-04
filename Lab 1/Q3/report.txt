@@ -1,0 +1,17 @@
+CS 342 Computer Networks Lab
+
+Name - Rasesh Srivastava
+Roll Number - 210123072
+Branch - Mathematics and Computing
+
+Lab Assignment - 1
+Question 3)
+
+1. Start your TCP client application without the TCP server running. What happens? Why?
+
+Ans) When we start the TCP client application without the TCP server running, we see the "Connection failed" message in our TCP client application. This is because when we start the TCP client application without the TCP server running, the client will attempt to establish a connection to the server using the specified IP address and port. As the server is not running, there is no process listening on the specified port. So, the TCP client's attempt to establish a connection will fail. This is why we see the "Connection failed" message in our TCP client application. In TCP, the client expects the server to be actively listening and available to establish a connection. If the server is not running, the client's connection attempt will fail.
+
+2. Start your UDP client application without the UDP server running. What happens? Why?
+
+Ans) When the UDP server is not running, the client application will still execute without any immediate issues. It will send the data to the specified server IP address and port, and it will not receive any response or acknowledgment from the server. Since the server is not running, there will be no server-side application to receive and process the UDP datagrams, so the data sent by the client will effectively be lost. This behaviour is different compared to TCP. In UDP, the client and server do not establish a connection in the same way as TCP. UDP is connectionless and does not require a handshake or connection setup before sending data. When the UDP client sends data to a specific IP address and port, it just sends the data out onto the network without waiting for a response from the server.
+ In UDP, the client can send data without needing a server to actively listen. If the server is not running, the client's data will be sent onto the network, but there won't be any server-side application to receive or process it.
