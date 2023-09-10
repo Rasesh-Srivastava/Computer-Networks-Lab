@@ -9,8 +9,6 @@
 #include <netinet/in.h>
 #include <unistd.h>
 using namespace std;
-char dns_servers[10][100];
-int dns_server_count = 0;
 unordered_map<string,vector<string>> mp;
 // Types of DNS resource records
 #define T_A 1  // Ipv4 address
@@ -18,57 +16,6 @@ unordered_map<string,vector<string>> mp;
 #define T_CNAME 5  // Canonical name
 #define DNS_SERVER "172.17.1.1"
 #define DNS_PORT 53
-
-void GetTheHostByName(unsigned char*, int);
-void ConvertToDNS_NameFormat(unsigned char*, unsigned char*);
-unsigned char* ReadTheDNS_Name(unsigned char*, unsigned char*, int*);
-
-struct QUESTION {
-    unsigned short qtype;
-    unsigned short qclass;
-};
-
-// DNS header structure
-struct DNS_HEADER {
-    unsigned short id;
-    unsigned char rd : 1; 
-    unsigned char tc : 1; 
-    unsigned char aa : 1; 
-    unsigned char opcode : 4;
-    unsigned char qr : 1; 
-
-    unsigned char rcode : 4; 
-    unsigned char cd : 1; 
-    unsigned char ad : 1;
-    unsigned char z : 1;
-    unsigned char ra : 1; 
-
-    unsigned short QuestionCount; 
-    unsigned short AnswerCount;
-    unsigned short AuthorityCount; 
-    unsigned short ResourceCount;
-};
-
-#pragma pack(push, 1)
-struct R_DATA {
-    unsigned short type;
-    unsigned short _class;
-    unsigned int ttl;
-    unsigned short data_len;
-};
-#pragma pack(pop)
-
-struct RES_RECORD {
-    unsigned char* name;
-    struct R_DATA* resource;
-    unsigned char* rdata;
-};
-
-typedef struct {
-    unsigned char* name;
-    struct QUESTION* ques;
-} QUERY;
-
 class LinkedList{
 private:
     struct Node{
@@ -139,6 +86,58 @@ public:
         return temp->data;
     }
 };
+
+void GetTheHostByName(unsigned char*, int);
+void ConvertToDNS_NameFormat(unsigned char*, unsigned char*);
+unsigned char* ReadTheDNS_Name(unsigned char*, unsigned char*, int*);
+
+struct QUESTION {
+    unsigned short qtype;
+    unsigned short qclass;
+};
+
+// DNS header structure
+struct DNS_HEADER {
+    unsigned short id;
+    unsigned char RecursionDesired : 1; 
+    unsigned char TruncatedMessage : 1; 
+    unsigned char AuthorityAnswer : 1; 
+    unsigned char purpose : 4;
+    unsigned char QueryResponseFlag : 1; 
+
+    unsigned char ResponseCode : 4; 
+    unsigned char CheckingDisabled : 1; 
+    unsigned char AuthenicatedData : 1;
+    unsigned char z : 1;
+    unsigned char RecursionAvailable : 1; 
+
+    unsigned short QuestionCount; 
+    unsigned short AnswerCount;
+    unsigned short AuthorityCount; 
+    unsigned short ResourceCount;
+};
+
+#pragma pack(push, 1)
+struct R_DATA {
+    unsigned short type;
+    unsigned short _class;
+    unsigned int ttl;
+    unsigned short data_len;
+};
+#pragma pack(pop)
+
+struct RES_RECORD {
+    unsigned char* name;
+    struct R_DATA* resource;
+    unsigned char* rdata;
+};
+
+typedef struct {
+    unsigned char* name;
+    struct QUESTION* ques;
+} QUERY;
+
+
 LinkedList _cache;
 void GetTheHostByName(unsigned char* host, int query_type) {
     string temphost(reinterpret_cast<char*>(host));
@@ -161,65 +160,70 @@ void GetTheHostByName(unsigned char* host, int query_type) {
             mp.erase(val);
         }
         unsigned char buf[65536], *qname, *reader;
-        int i, j, stop, s;
+        int i;
+        int j;
+        int stop;
+        int s;
+        struct sockaddr_in TheDestination;
+        struct DNS_HEADER* DomainNameSystem = nullptr;
+        struct QUESTION* QuestionInformation = nullptr;
         struct sockaddr_in a;
-        struct RES_RECORD answers[20], auth[20], addit[20];
-        struct sockaddr_in dest;
-        struct DNS_HEADER* dns = nullptr;
-        struct QUESTION* qinfo = nullptr;
+        struct RES_RECORD MyAuthoratativeRecords[20];
+        struct RES_RECORD MyAdditionalRecords[20];
+        struct RES_RECORD answers[20];  
         printf("Resolving ");
         cout << host;
         s = socket(AF_INET, SOCK_DGRAM, 0);
-        dest.sin_family = AF_INET;
-        dest.sin_port = htons(DNS_PORT);
-        dest.sin_addr.s_addr = inet_addr(DNS_SERVER);
-        dns = (struct DNS_HEADER*)&buf;
-        dns->id = (unsigned short)htons(getpid());
-        dns->qr = 0; 
-        dns->opcode = 0; 
-        dns->aa = 0; 
-        dns->tc = 0; 
-        dns->rd = 1; 
-        dns->ra = 0;
-        dns->z = 0;
-        dns->ad = 0;
-        dns->cd = 0;
-        dns->rcode = 0;
-        dns->QuestionCount = htons(1);
-        dns->AnswerCount = 0;
-        dns->AuthorityCount = 0;
-        dns->ResourceCount = 0;
+        TheDestination.sin_family = AF_INET;
+        TheDestination.sin_port = htons(DNS_PORT);
+        TheDestination.sin_addr.s_addr = inet_addr(DNS_SERVER);
+        DomainNameSystem = (struct DNS_HEADER*)&buf;
+        DomainNameSystem->id = (unsigned short)htons(getpid());
+        DomainNameSystem->QueryResponseFlag = 0; 
+        DomainNameSystem->purpose = 0; 
+        DomainNameSystem->AuthorityAnswer = 0; 
+        DomainNameSystem->TruncatedMessage = 0; 
+        DomainNameSystem->RecursionDesired = 1; 
+        DomainNameSystem->RecursionAvailable = 0;
+        DomainNameSystem->z = 0;
+        DomainNameSystem->AuthenicatedData = 0;
+        DomainNameSystem->CheckingDisabled = 0;
+        DomainNameSystem->ResponseCode = 0;
+        DomainNameSystem->QuestionCount = htons(1);
+        DomainNameSystem->AnswerCount = 0;
+        DomainNameSystem->AuthorityCount = 0;
+        DomainNameSystem->ResourceCount = 0;
         qname = (unsigned char*)&buf[sizeof(struct DNS_HEADER)];
 
         ConvertToDNS_NameFormat(qname, host);
-        qinfo = (struct QUESTION*)&buf[sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1)];
-        qinfo->qtype = htons(query_type); // Type of the query (A, MX, CNAME, NS, etc.)
-        qinfo->qclass = htons(1); 
+        QuestionInformation = (struct QUESTION*)&buf[sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1)];
+        QuestionInformation->qtype = htons(query_type); // Type of the query (A, MX, CNAME, NS, etc.)
+        QuestionInformation->qclass = htons(1); 
         printf("\nSending Packet...");
-        if (sendto(s, (char*)buf, sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1) + sizeof(struct QUESTION), 0, (struct sockaddr*)&dest, sizeof(dest)) < 0) {
+        if (sendto(s, (char*)buf, sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1) + sizeof(struct QUESTION), 0, (struct sockaddr*)&TheDestination, sizeof(TheDestination)) < 0) {
             perror("Sending Packet failed :(");
         }
         printf("Done");
 
         // Receive the answer
-        i = sizeof(dest);
+        i = sizeof(TheDestination);
         printf("\nReceiving answer...");
-        if (recvfrom(s, (char*)buf, 65536, 0, (struct sockaddr*)&dest, (socklen_t*)&i) < 0) {
+        if (recvfrom(s, (char*)buf, 65536, 0, (struct sockaddr*)&TheDestination, (socklen_t*)&i) < 0) {
             perror("recvfrom failed");
         }
         printf("Done");
 
-        dns = (struct DNS_HEADER*)buf;
+        DomainNameSystem = (struct DNS_HEADER*)buf;
         reader = &buf[sizeof(struct DNS_HEADER) + (strlen((const char*)qname) + 1) + sizeof(struct QUESTION)];
 
         // cout << "\nThe response contains: ";
-        // cout << "\n" << ntohs(dns->QuestionCount) << " Questions.";
-        // cout << "\n" << ntohs(dns->AnswerCount) << " Answers.";
-        // cout << "\n" << ntohs(dns->AuthorityCount) << " Authoritative Servers.";
-        // cout << "\n" << ntohs(dns->ResourceCount) << " Additional records.\n\n";
+        // cout << "\n" << ntohs(DomainNameSystem->QuestionCount) << " Questions.";
+        // cout << "\n" << ntohs(DomainNameSystem->AnswerCount) << " Answers.";
+        // cout << "\n" << ntohs(DomainNameSystem->AuthorityCount) << " Authoritative Servers.";
+        // cout << "\n" << ntohs(DomainNameSystem->ResourceCount) << " Additional records.\n\n";
 
         stop = 0;
-        for (i = 0; i < ntohs(dns->AnswerCount); i++) {
+        for (i = 0; i < ntohs(DomainNameSystem->AnswerCount); i++) {
             answers[i].name = ReadTheDNS_Name(reader, buf, &stop);
             reader = reader + stop;
 
@@ -244,39 +248,39 @@ void GetTheHostByName(unsigned char* host, int query_type) {
         }
 
         // Read Authorities
-        for (i = 0; i < ntohs(dns->AuthorityCount); i++) {
-            auth[i].name = ReadTheDNS_Name(reader, buf, &stop);
+        for (i = 0; i < ntohs(DomainNameSystem->AuthorityCount); i++) {
+            MyAuthoratativeRecords[i].name = ReadTheDNS_Name(reader, buf, &stop);
             reader += stop;
 
-            auth[i].resource = (struct R_DATA*)(reader);
+            MyAuthoratativeRecords[i].resource = (struct R_DATA*)(reader);
             reader += sizeof(struct R_DATA);
 
-            auth[i].rdata = ReadTheDNS_Name(reader, buf, &stop);
+            MyAuthoratativeRecords[i].rdata = ReadTheDNS_Name(reader, buf, &stop);
             reader += stop;
         }
 
         // Read Additional Resource Records
-        for (i = 0; i < ntohs(dns->ResourceCount); i++) {
-            addit[i].name = ReadTheDNS_Name(reader, buf, &stop);
+        for (i = 0; i < ntohs(DomainNameSystem->ResourceCount); i++) {
+            MyAdditionalRecords[i].name = ReadTheDNS_Name(reader, buf, &stop);
             reader += stop;
-            addit[i].resource = (struct R_DATA*)(reader);
+            MyAdditionalRecords[i].resource = (struct R_DATA*)(reader);
             reader += sizeof(struct R_DATA);
-            if (ntohs(addit[i].resource->type) == 1) {
-                addit[i].rdata = (unsigned char*)malloc(ntohs(addit[i].resource->data_len));
-                for (j = 0; j < ntohs(addit[i].resource->data_len); j++)
-                    addit[i].rdata[j] = reader[j];
+            if (ntohs(MyAdditionalRecords[i].resource->type) == 1) {
+                MyAdditionalRecords[i].rdata = (unsigned char*)malloc(ntohs(MyAdditionalRecords[i].resource->data_len));
+                for (j = 0; j < ntohs(MyAdditionalRecords[i].resource->data_len); j++)
+                    MyAdditionalRecords[i].rdata[j] = reader[j];
 
-                addit[i].rdata[ntohs(addit[i].resource->data_len)] = '\0';
-                reader += ntohs(addit[i].resource->data_len);
+                MyAdditionalRecords[i].rdata[ntohs(MyAdditionalRecords[i].resource->data_len)] = '\0';
+                reader += ntohs(MyAdditionalRecords[i].resource->data_len);
             } else {
-                addit[i].rdata = ReadTheDNS_Name(reader, buf, &stop);
+                MyAdditionalRecords[i].rdata = ReadTheDNS_Name(reader, buf, &stop);
                 reader += stop;
             }
         }
         // Print Answer Records
-        cout << "\nAnswer Records: " << ntohs(dns->AnswerCount) << "\n";
+        cout << "\nAnswer Records: " << ntohs(DomainNameSystem->AnswerCount) << "\n";
         vector<string> ips;
-        for (i = 0; i < ntohs(dns->AnswerCount); i++) {
+        for (i = 0; i < ntohs(DomainNameSystem->AnswerCount); i++) {
             cout << "Name: " << answers[i].name;
 
             if (ntohs(answers[i].resource->type) == T_A)
@@ -298,23 +302,23 @@ void GetTheHostByName(unsigned char* host, int query_type) {
         mp.insert({temphost,ips});
         _cache.PushFront(temphost);
         // // Print authorities
-        // cout << "\nAuthoritative Records: " << ntohs(dns->AuthorityCount) << "\n";
-        // for (i = 0; i < ntohs(dns->AuthorityCount); i++) {
+        // cout << "\nAuthoritative Records: " << ntohs(DomainNameSystem->AuthorityCount) << "\n";
+        // for (i = 0; i < ntohs(DomainNameSystem->AuthorityCount); i++) {
 
-        //     cout << "Name: " << auth[i].name;
-        //     if (ntohs(auth[i].resource->type) == 2) {
-        //         cout << " has nameserver: " << auth[i].rdata;
+        //     cout << "Name: " << MyAuthoratativeRecords[i].name;
+        //     if (ntohs(MyAuthoratativeRecords[i].resource->type) == 2) {
+        //         cout << " has nameserver: " << MyAuthoratativeRecords[i].rdata;
         //     }
         //     cout << "\n";
         // }
 
         // // Print additional resource records
-        // cout << "\nAdditional Records: " << ntohs(dns->ResourceCount) << "\n";
-        // for (i = 0; i < ntohs(dns->ResourceCount); i++) {
-        //     cout << "Name: " << addit[i].name;
-        //     if (ntohs(addit[i].resource->type) == 1) {
+        // cout << "\nAdditional Records: " << ntohs(DomainNameSystem->ResourceCount) << "\n";
+        // for (i = 0; i < ntohs(DomainNameSystem->ResourceCount); i++) {
+        //     cout << "Name: " << MyAdditionalRecords[i].name;
+        //     if (ntohs(MyAdditionalRecords[i].resource->type) == 1) {
         //         long* p;
-        //         p = (long*)addit[i].rdata;
+        //         p = (long*)MyAdditionalRecords[i].rdata;
         //         a.sin_addr.s_addr = (*p);
         //         cout << " has IPv4 address: " << inet_ntoa(a.sin_addr);
         //     }
@@ -410,18 +414,18 @@ unsigned char* ReadTheDNS_Name(unsigned char* reader, unsigned char* buffer, int
 /*
  * Convert hostname to DNS name format
  */
-void ConvertToDNS_NameFormat(unsigned char* dns, unsigned char* host) {
+void ConvertToDNS_NameFormat(unsigned char* DomainNameSystem, unsigned char* host) {
     int lock = 0, i;
     strcat((char*)host, ".");
 
     for (i = 0; i < strlen((char*)host); i++) {
         if (host[i] == '.') {
-            *dns++ = i - lock;
+            *DomainNameSystem++ = i - lock;
             for (; lock < i; lock++) {
-                *dns++ = host[lock];
+                *DomainNameSystem++ = host[lock];
             }
             lock++; // or lock=i+1;
         }
     }
-    *dns++ = '\0';
+    *DomainNameSystem++ = '\0';
 }
